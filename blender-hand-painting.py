@@ -6,12 +6,12 @@ import cv2
 import os
 import sys
 
+# TODO: Load other modules without this hax
 dir = os.path.dirname(bpy.data.filepath)
 if not dir in sys.path:
     sys.path.append(dir)
 
-
-from trackers import FaceTracker
+from trackers import PointerTracker
 from bpy.props import IntProperty, FloatProperty
 from bpy_extras import view3d_utils
 
@@ -22,7 +22,8 @@ class HandDrawOperator(bpy.types.Operator):
     _timer = None
 
     def modal(self, context, event):
-        context.area.tag_redraw()
+        if self.debug is True:
+            context.area.tag_redraw()
 
         if event.type == 'LEFTMOUSE':
             bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
@@ -31,58 +32,47 @@ class HandDrawOperator(bpy.types.Operator):
             bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
             return {'CANCELLED'}
         elif event.type == 'TIMER':
-            print('[INFO]: Checking input')
 
             if self.video_capture.isOpened():
-                print('[INFO]: Video capture is open')
-                rval, frame = self.video_capture.read()
+                rval, image = self.video_capture.read()
             else:
-                print('[INFO]: Video capture is closed')
-                rval = False
+                error('Video capture is closed')
+                return {'CANCELLED'}
 
-            if rval:
-                print('[INFO]: Updating position')
-                image = frame
-                self.face_tracker.update(image)
-                if len(self.face_tracker._faces) > 0:
-                    x, y, w, h = self.face_tracker._faces[0].faceRect
-                    im_y, im_x, channels = image.shape
+            self.tracker.update(image)
+            if len(self.tracker.pointers) > 0:
+                # TODO: move to tracer
+                region = bpy.context.region
+                region3d = bpy.context.space_data.region_3d
+                pos_x, pos_y = get_pointer_pos(self.tracker.pointers[0].rect, image, region.width, region.height)
 
-                    region = bpy.context.region
-                    region3d = bpy.context.space_data.region_3d
+                if self.prev_pos_x is None or self.prev_pos_y is None:
+                    self.prev_pos_x = pos_x
+                    self.prev_pos_y = pos_y
+                    view_vector = view3d_utils.region_2d_to_vector_3d(region, region3d, [pos_x, pos_y])
+                    self.last_pos = view3d_utils.region_2d_to_location_3d(region, region3d, [pos_x, pos_y], view_vector)
+                    return {'PASS_THROUGH'}
 
-                    pos_x = region.width * (1 - ((x + 0.5 * w) / im_x))
-                    pos_y = region.height * (1 - ((y + 0.5 * h) / im_y))
+                if math.fabs(self.prev_pos_x - pos_x) > 0.2 * region.width or math.fabs(self.prev_pos_y - pos_y) > 0.2 * region.height :
+                    self.prev_pos_x = None
+                    self.prev_pos_y = None
+                    self.last_pos = None
+                    return {'PASS_THROUGH'}
 
-                    pos_x_a = x + 0.5 * w
-                    pos_y_a = y + 0.5 * h
+                self.prev_pos_x = pos_x
+                self.prev_pos_y = pos_y
 
-                    if self.pos_x_a is None:
-                        self.pos_x_a = pos_x_a
-                    if self.pos_y_a is None:
-                        self.pos_y_a = pos_y_a
-
-                    if math.fabs(self.pos_x_a - pos_x_a) > 0.2 * im_x:
-                        return {'PASS_THROUGH'}
-                    if math.fabs(self.pos_y_a - pos_y_a) > 0.2 * im_y:
-                        return {'PASS_THROUGH'}
-
-                    self.pos_x_a = pos_x_a
-                    self.pos_y_a = pos_y_a
-
-                    self.mouse_pos = [pos_x, pos_y]
+                self.mouse_pos = [pos_x, pos_y]
+                if self.debug:
                     print('[INFO]: Position <{}, {}>'.format(pos_x, pos_y))
-                    view_vector = view3d_utils.region_2d_to_vector_3d(region, region3d, self.mouse_pos)
-                    self.loc = view3d_utils.region_2d_to_location_3d(region, region3d, self.mouse_pos, view_vector)
+                view_vector = view3d_utils.region_2d_to_vector_3d(region, region3d, self.mouse_pos)
+                self.loc = view3d_utils.region_2d_to_location_3d(region, region3d, self.mouse_pos, view_vector)
 
-                    stroke = get_stroke()
-                    stroke.points.add(count = 2)
-                    stroke.points[0].co = (self.last_pos)
-                    stroke.points[1].co = (self.loc)
-                    self.last_pos = self.loc
-            else:
-                print('Shit...')
-
+                stroke = get_stroke()
+                stroke.points.add(count = 2)
+                stroke.points[0].co = (self.last_pos)
+                stroke.points[1].co = (self.loc)
+                self.last_pos = self.loc
 
         return {'PASS_THROUGH'}
 
@@ -91,16 +81,15 @@ class HandDrawOperator(bpy.types.Operator):
         self._handle = bpy.types.SpaceView3D.draw_handler_add(draw_callback_px, args, 'WINDOW', 'POST_PIXEL')
 
         self._timer = context.window_manager.event_timer_add(0.1, context.window)
-        self.counter = 0
+        self.tracker = PointerTracker()
+        self.video_capture = cv2.VideoCapture(0)
         self.mouse_pos = [0, 0]
         self.last_pos = [0, 0, 0]
         self.loc = [0, 0, 0]
-        self.pos_x_a = None
-        self.pos_y_a = None
+        self.prev_pos_x = None
+        self.prev_pos_y = None
 
-        self.face_tracker = FaceTracker()
-        print('[INFO]: Opening video capture')
-        self.video_capture = cv2.VideoCapture(0)
+        self.debug = True
 
         context.window_manager.modal_handler_add(self)
 
@@ -110,8 +99,23 @@ class HandDrawOperator(bpy.types.Operator):
         context.window_manager.event_timer_remove(self._timer)
         self.viceo_capture.close()
 
+def error(msg):
+    print('[ERROR]: {msg}'.format(msg=msg))
+
+def get_pointer_pos(pointer_rect, image, viewport_x, viewport_y):
+    pointer_x, pointer_y, pointer_w, pointer_h = pointer_rect
+    image_w, image_h, image_channels = image.shape
+
+    pos_x_abs = pointer_x + 0.5 * pointer_w
+    pos_y_abs = pointer_y + 0.5 * pointer_h
+
+    pos_x_view = viewport_x * (1 - ((pointer_x + 0.5 * pointer_w) / image_w))
+    pos_y_view = viewport_y * (1 - ((pointer_y + 0.5 * pointer_h) / image_h))
+
+    return pos_x_view, pos_y_view
+
 def get_stroke():
-    sc= bpy.context.scene
+    sc = bpy.context.scene
 
     # Create grease pencil data if none exists
     if not sc.grease_pencil:

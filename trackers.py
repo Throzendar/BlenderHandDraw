@@ -2,25 +2,25 @@ import cv2
 import rects
 import utils
 
-class Face():
+class Pointer():
     def __init__(self):
-        self.faceRect = None
+        self.rect = None
 
-class FaceTracker():
+class PointerTracker():
 
     def __init__(self, scaleFactor=1.1, minNeighbors=2):
         self.scaleFactor = scaleFactor
         self.minNeighbors = minNeighbors
-        self._faces = []
+        self._pointers = []
 
-        self._faceClassifier = cv2.CascadeClassifier('cascades/haarcascade_frontalface_default.xml')
+        self._classifier = cv2.CascadeClassifier('cascades/haarcascade_frontalface_default.xml')
 
     @property
-    def faces(self):
-        return self._faces
+    def pointers(self):
+        return self._pointers
 
     def update(self, image):
-        self._faces = []
+        self._pointers = []
 
         if utils.isGray(image):
             image = cv2.equalizeHist(image)
@@ -30,14 +30,14 @@ class FaceTracker():
 
         minSize = utils.widthHeightDividedBy(image, 8)
 
-        faceRects = self._faceClassifier.detectMultiScale(image, self.scaleFactor, self.minNeighbors, 0, minSize)
+        pointer_rects = self._classifier.detectMultiScale(image, self.scaleFactor, self.minNeighbors, 0, minSize)
 
-        if faceRects is not None:
-            for faceRect in faceRects:
-                face = Face()
-                face.faceRect = faceRect
+        if pointer_rects is not None:
+            for rect in pointer_rects:
+                pointer = Pointer()
+                pointer.rect = rect
 
-                self._faces.append(face)
+                self._pointers.append(pointer)
 
     def _detectOneObject(self, classifier, image, rect, imageSizeToMinSizeRatio):
         x, y, w, h = rect
