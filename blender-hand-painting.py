@@ -2,13 +2,24 @@ import bpy
 import bgl
 import blf
 import math
+import cv2
+import os
+import sys
 
+dir = os.path.dirname(bpy.data.filepath)
+if not dir in sys.path:
+    sys.path.append(dir)
+
+
+from trackers import FaceTracker
 from bpy.props import IntProperty, FloatProperty
 from bpy_extras import view3d_utils
 
 class HandDrawOperator(bpy.types.Operator):
     bl_idname = 'gpencil.hand_draw'
     bl_label = 'Hand Draw Modal Operator'
+
+    _timer = None
 
     def modal(self, context, event):
         context.area.tag_redraw()
@@ -19,41 +30,85 @@ class HandDrawOperator(bpy.types.Operator):
         elif event.type in {'RIGHTMOUSE', 'ESC'}:
             bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
             return {'CANCELLED'}
-        elif event.type == 'MOSUEMOVE':
-            self.counter += 1
+        elif event.type == 'TIMER':
+            print('[INFO]: Checking input')
 
-        self.mouse_pos = [event.mouse_region_x, event.mouse_region_y]
-        self.object = bpy.context.object
-        region = bpy.context.region
-        region3d = bpy.context.space_data.region_3d
+            if self.video_capture.isOpened():
+                print('[INFO]: Video capture is open')
+                rval, frame = self.video_capture.read()
+            else:
+                print('[INFO]: Video capture is closed')
+                rval = False
 
-        view_vector = view3d_utils.region_2d_to_vector_3d(region, region3d, self.mouse_pos)
-        self.loc = view3d_utils.region_2d_to_location_3d(region, region3d, self.mouse_pos, view_vector)
+            if rval:
+                print('[INFO]: Updating position')
+                image = frame
+                self.face_tracker.update(image)
+                if len(self.face_tracker._faces) > 0:
+                    x, y, w, h = self.face_tracker._faces[0].faceRect
+                    im_y, im_x, channels = image.shape
 
-        self.counter += 1
-        if self.counter == 10:
-            stroke = get_stroke()
+                    region = bpy.context.region
+                    region3d = bpy.context.space_data.region_3d
 
-            stroke.points.add(count = 2)
-            stroke.points[0].co = (self.last_pos)
-            stroke.points[1].co = (self.loc)
-            self.last_pos = self.loc
-            self.counter = 0
+                    pos_x = region.width * (1 - ((x + 0.5 * w) / im_x))
+                    pos_y = region.height * (1 - ((y + 0.5 * h) / im_y))
 
-        return {'RUNNING_MODAL'}
+                    pos_x_a = x + 0.5 * w
+                    pos_y_a = y + 0.5 * h
 
-    def invoke(self, context, event):
+                    if self.pos_x_a is None:
+                        self.pos_x_a = pos_x_a
+                    if self.pos_y_a is None:
+                        self.pos_y_a = pos_y_a
+
+                    if math.fabs(self.pos_x_a - pos_x_a) > 0.2 * im_x:
+                        return {'PASS_THROUGH'}
+                    if math.fabs(self.pos_y_a - pos_y_a) > 0.2 * im_y:
+                        return {'PASS_THROUGH'}
+
+                    self.pos_x_a = pos_x_a
+                    self.pos_y_a = pos_y_a
+
+                    self.mouse_pos = [pos_x, pos_y]
+                    print('[INFO]: Position <{}, {}>'.format(pos_x, pos_y))
+                    view_vector = view3d_utils.region_2d_to_vector_3d(region, region3d, self.mouse_pos)
+                    self.loc = view3d_utils.region_2d_to_location_3d(region, region3d, self.mouse_pos, view_vector)
+
+                    stroke = get_stroke()
+                    stroke.points.add(count = 2)
+                    stroke.points[0].co = (self.last_pos)
+                    stroke.points[1].co = (self.loc)
+                    self.last_pos = self.loc
+            else:
+                print('Shit...')
+
+
+        return {'PASS_THROUGH'}
+
+    def execute(self, context):
         args = (self, context)
         self._handle = bpy.types.SpaceView3D.draw_handler_add(draw_callback_px, args, 'WINDOW', 'POST_PIXEL')
 
+        self._timer = context.window_manager.event_timer_add(0.1, context.window)
         self.counter = 0
         self.mouse_pos = [0, 0]
         self.last_pos = [0, 0, 0]
         self.loc = [0, 0, 0]
+        self.pos_x_a = None
+        self.pos_y_a = None
+
+        self.face_tracker = FaceTracker()
+        print('[INFO]: Opening video capture')
+        self.video_capture = cv2.VideoCapture(0)
 
         context.window_manager.modal_handler_add(self)
 
         return {'RUNNING_MODAL'}
+
+    def cancel(self, context):
+        context.window_manager.event_timer_remove(self._timer)
+        self.viceo_capture.close()
 
 def get_stroke():
     sc= bpy.context.scene
