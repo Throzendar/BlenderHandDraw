@@ -1,78 +1,58 @@
-import bpy, math
+import bpy
+import bgl
+import blf
+import math
 
 from bpy.props import IntProperty, FloatProperty
+from bpy_extras import view3d_utils
 
 class HandDrawOperator(bpy.types.Operator):
     bl_idname = 'gpencil.hand_draw'
     bl_label = 'Hand Draw Modal Operator'
 
-    #def execute(self, context):
-    #    str = get_stroke()
-    #    # Number of stroke points
-    #    strokeLength = 500
-
-    #    # Add points
-    #    str.points.add(count = strokeLength )
-
-    #    pi, twopi = math.pi, 2*math.pi
-
-    #    theta = [20 * twopi * i / strokeLength for i in range(strokeLength)]
-
-    #    mean  = sum(theta)/float(len(theta))
-
-    #    theta = [th - mean for th in theta]
-
-    #    r = [4 - 2*math.cos(0.1*th) for th in theta]
-
-    #    y = [th/twopi for th in theta]
-    #    x = [a*math.cos(b) for a, b in zip(r, theta)]
-    #    z = [a*math.sin(b) for a, b in zip(r, theta)]
-
-    #    krazy_koil_points = list(zip(x, y, z))
-
-    #    points = str.points
-    #    for i, point in enumerate(points):
-    #        points[i].co = krazy_koil_points[i]
-    #    return {'FINISHED'}
-
-    first_mouse_x = IntProperty()
-    first_mouse_y = IntProperty()
-    counter = 0
-
     def modal(self, context, event):
-        self.counter += 1
+        context.area.tag_redraw()
 
+        if event.type == 'LEFTMOUSE':
+            bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+            return {'FINISHED'}
+        elif event.type in {'RIGHTMOUSE', 'ESC'}:
+            bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+            return {'CANCELLED'}
+        elif event.type == 'MOSUEMOVE':
+            self.counter += 1
+
+        self.mouse_pos = [event.mouse_region_x, event.mouse_region_y]
+        self.object = bpy.context.object
+        region = bpy.context.region
+        region3d = bpy.context.space_data.region_3d
+
+        view_vector = view3d_utils.region_2d_to_vector_3d(region, region3d, self.mouse_pos)
+        self.loc = view3d_utils.region_2d_to_location_3d(region, region3d, self.mouse_pos, view_vector)
+
+        self.counter += 1
         if self.counter == 10:
             stroke = get_stroke()
 
             stroke.points.add(count = 2)
-            print(len(stroke.points))
-
-            print(event.mouse_x)
-            print(event.mouse_y)
-            print(self.first_mouse_x)
-            print(self.first_mouse_y)
-            stroke.points[0].co = (event.mouse_x, event.mouse_y, 0)
-            stroke.points[1].co = (self.first_mouse_x, self.first_mouse_y, 0)
-
-
-            self.first_mouse_x = event.mouse_x
-            self.first_mouse_y = event.mouse_y
+            stroke.points[0].co = (self.last_pos)
+            stroke.points[1].co = (self.loc)
+            self.last_pos = self.loc
             self.counter = 0
-
-        if event.type == 'LEFTMOUSE':
-            return {'FINISHED'}
-
-        elif event.type in {'RIGHTMOUSE', 'ESC'}:
-            return {'CANCELLED'}
 
         return {'RUNNING_MODAL'}
 
     def invoke(self, context, event):
-        self.first_mouse_x = event.mouse_x
-        self.first_mouse_y = event.mouse_y
+        args = (self, context)
+        self._handle = bpy.types.SpaceView3D.draw_handler_add(draw_callback_px, args, 'WINDOW', 'POST_PIXEL')
+
+        self.counter = 0
+        self.mouse_pos = [0, 0]
+        self.last_pos = [0, 0, 0]
+        self.loc = [0, 0, 0]
 
         context.window_manager.modal_handler_add(self)
+
         return {'RUNNING_MODAL'}
 
 def get_stroke():
@@ -101,11 +81,11 @@ def get_stroke():
     else:
         gpl = gp.layers.new('gpl', set_active = True )
 
-    # Reference active GP frame or create one of none exists    
+    # Reference active GP frame or create one of none exists
     if gpl.frames:
         fr = gpl.active_frame
     else:
-        fr = gpl.frames.new(1) 
+        fr = gpl.frames.new(1)
 
     # Create a new stroke
     stroke = fr.strokes.new()
@@ -118,6 +98,14 @@ def register():
 
 def unregister():
     bpy.utils.unregister_class(HandDrawOperator)
+
+def draw_callback_px(self, context):
+    font_id = 0
+    blf.position(font_id, 15, 100, 0)
+    blf.size(font_id, 12, 72)
+    blf.draw(font_id, "Mouse position: " + str(self.mouse_pos[0]) + "/" + str(self.mouse_pos[1]) )
+    blf.position(font_id, 15, 115, 0)
+    blf.draw(font_id, "3d pos" + str(self.loc[0]) + "/" + str(self.loc[1]) + "/" + str(self.loc[2])  )
 
 if __name__ == '__main__':
     register()
