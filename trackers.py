@@ -13,7 +13,7 @@ class PointerTracker():
         self.minNeighbors = minNeighbors
         self._pointers = []
 
-        self._classifier = cv2.CascadeClassifier('cascades/haarcascade_frontalface_default.xml')
+        self._classifier = cv2.CascadeClassifier('cascades/haarcascade_fist.xml')
 
     @property
     def pointers(self):
