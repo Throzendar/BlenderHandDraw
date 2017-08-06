@@ -18,10 +18,10 @@ from bpy_extras import view3d_utils
 class HandDrawOperator(bpy.types.Operator):
     bl_idname = 'gpencil.hand_draw'
     bl_label = 'Hand Draw Modal Operator'
-
     _timer = None
 
     def modal(self, context, event):
+        jitter_filter = 10.0
         if self.debug is True:
             context.area.tag_redraw()
 
@@ -45,6 +45,16 @@ class HandDrawOperator(bpy.types.Operator):
                 region = bpy.context.region
                 region3d = bpy.context.space_data.region_3d
                 pos_x, pos_y = get_pointer_pos(self.tracker.pointers[0].rect, image, region.width, region.height)
+                #eliminate jitter here
+                if self.prev_pos_x is not None and self.prev_pos_y is not None:
+                    deltaX= abs(self.prev_pos_x - pos_x)
+                    deltaY= abs(self.prev_pos_y - pos_y)
+                    print(deltaX)
+                    print(deltaY)
+                    if deltaX<jitter_filter and deltaY<jitter_filter:
+                        print("ommit")
+                        return {'PASS_THROUGH'}
+
 
                 if self.prev_pos_x is None or self.prev_pos_y is None:
                     self.prev_pos_x = pos_x
